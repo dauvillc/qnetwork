@@ -29,11 +29,10 @@ def get_random_rows(matrix: torch.tensor, nb_rows: int) -> torch.tensor:
     :param nb_rows       The number of rows to take from matrix and concatenate
     :return: A concatenation of nb_rows rows from matrix.
     """
-    first_dim_size = matrix.size()[0];
+    first_dim_size = matrix.size()[0]
     if first_dim_size < nb_rows:
-        raise IndexError("Not enough rows in matrix of shape " + matrix.size()
-                         + " to extract " + nb_rows + " rows.")
-        return None
+        raise IndexError("Not enough rows in matrix of shape ", matrix.size(),
+                         " to extract ", nb_rows, " rows.")
     return matrix[random.sample(range(matrix.size), nb_rows)]
 
 
@@ -83,6 +82,53 @@ class ExperienceMemory:
             self.reward_mem = torch.cat((self.reward_mem,
                                          torch.tensor(reward).view(1, -1)),
                                         dim=0)
+
+    def memorize_exploration(self, states: torch.tensor,
+                             actions: torch.tensor,
+                             next_states: torch.tensor,
+                             final_reward: torch.float32):
+        """
+        Memorizes a whole exploration process with a final single reward.
+        Should be used for processes for which the reward isn't specifically known for
+        every state-action couple, but rather according to a final score.
+        :param states: Successive states encountered. Should be a tensor of shape
+                      (number_of_states, state_dim).
+        :param actions: Successive actions decided by the agent. Should be a tensor of shape
+                       (number_of_states, action_dim)
+        :param next_states: For each state-action (s, a) encountered, state s' returned by the
+                           environment. Same shape as :param state:.
+        :param final_reward: Final score of the exploration.
+        """
+        if len(states.size()) + len(actions.size()) + len(next_states.size()) != 6:
+            print("Error: states, actions and next_states should each be 2 dimensional.")
+            return None
+
+        if self.need_init:
+            self.state_mem = states
+            self.action_mem = actions
+            self.nstate_mem = next_states
+            self.reward_mem = torch.tensor([[final_reward]])
+            self.need_init = False
+        else:
+            self.state_mem = torch.cat((self.state_mem, states), dim=0)
+            self.action_mem = torch.cat((self.action_mem, actions), dim=0)
+            self.nstate_mem = torch.cat((self.nstate_mem, next_states), dim=0)
+            nb_states_added = states.size()[0]
+            self.reward_mem = torch.cat((self.reward_mem,
+                                         torch.full((nb_states_added, 1), final_reward)), dim=0)
+
+    def set_last_rewards(self, nb_rewards: int, value: torch.float32):
+        """
+        Sets the last nb_rewards rewards memorized to the given value.
+        Should be used when the rewards of a sequence of actions are not known,
+        and the agent only receives a reward at the end of
+        the episode (for example corresponding to the score in a game). In this case,
+        store the experiences with any reward, then use this function with the received score.
+
+        :param nb_rewards: Number of experiences whose reward should be affected.
+        :param value: Value the rewards should be set to.
+        """
+        self.reward_mem[-nb_rewards:] = value
 
     def random_batch(self, batch_size: int):
         """
