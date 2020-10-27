@@ -26,7 +26,7 @@ class QAgent:
     """
 
     def __init__(self, nb_states: int, nb_actions: int,
-                 epsilon_prob: float = 0.05, gamma=0.9,
+                 epsilon_prob: float = 0.05, gamma=0.99,
                  lr=0.1,
                  batch_replay_size=1024):
         """
@@ -87,5 +87,9 @@ class QAgent:
         """
         states, actions, nstates, rewards = self.mem.random_batch(self.batch_replay_size)
         for s, a, ns, r in zip(states, actions, nstates, rewards):
+            s = s.item()
+            a = a.item()
+            ns = ns.item()
+            r = r.item()
             self.Q[s, a] = (1 - self.lr) * self.Q[s, a] \
                 + self.lr * (r + self.gamma * torch.max(self.Q[ns]))
