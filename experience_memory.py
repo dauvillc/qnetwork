@@ -57,7 +57,7 @@ class ExperienceMemory:
         self.nstate_mem = None
 
     def memorize(self, state: torch.tensor,
-                 action: torch.tensor,
+                 action: int,
                  next_state: torch.tensor,
                  reward: torch.float32):
         """
@@ -71,20 +71,20 @@ class ExperienceMemory:
         # as containing only the values from the first experience.
         if self.need_init:
             self.state_mem = state.view(1, -1)
-            self.action_mem = action.view(1, -1)
+            self.action_mem = torch.tensor([action], dtype=torch.int32)
             self.nstate_mem = next_state.view(1, -1)
-            self.reward_mem = torch.tensor([[reward]])
+            self.reward_mem = torch.tensor([reward])
             self.need_init = False
         else:
             self.state_mem = mem_tensor_append(self.state_mem, state)
-            self.action_mem = mem_tensor_append(self.action_mem, action)
+            self.action_mem = torch.cat((self.action_mem,
+                                         torch.tensor([action])))
             self.nstate_mem = mem_tensor_append(self.nstate_mem, next_state)
             self.reward_mem = torch.cat((self.reward_mem,
-                                         torch.tensor(reward).view(1, -1)),
-                                        dim=0)
+                                         torch.tensor([reward])))
 
     def memorize_exploration(self, states: torch.tensor,
-                             actions: torch.tensor,
+                             actions: torch.IntTensor,
                              next_states: torch.tensor,
                              final_reward: torch.float32):
         """
@@ -94,7 +94,7 @@ class ExperienceMemory:
         :param states: Successive states encountered. Should be a tensor of shape
                       (number_of_states, state_dim).
         :param actions: Successive actions decided by the agent. Should be a tensor of shape
-                       (number_of_states, action_dim)
+                       (number_of_states)
         :param next_states: For each state-action (s, a) encountered, state s' returned by the
                            environment. Same shape as :param state:.
         :param final_reward: Final score of the exploration.
@@ -111,11 +111,11 @@ class ExperienceMemory:
             self.need_init = False
         else:
             self.state_mem = torch.cat((self.state_mem, states), dim=0)
-            self.action_mem = torch.cat((self.action_mem, actions), dim=0)
+            self.action_mem = torch.cat((self.action_mem, actions))
             self.nstate_mem = torch.cat((self.nstate_mem, next_states), dim=0)
             nb_states_added = states.size()[0]
             self.reward_mem = torch.cat((self.reward_mem,
-                                         torch.full((nb_states_added, 1), final_reward)), dim=0)
+                                         torch.full(nb_states_added, final_reward)))
 
     def set_last_rewards(self, nb_rewards: int, value: torch.float32):
         """

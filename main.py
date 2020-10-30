@@ -42,7 +42,7 @@ if __name__ == '__main__':
 
     batch_size = 32
 
-    agent = QAgent(nb_states, nb_actions, batch_replay_size=batch_size)
+    agent = QAgent(nb_states, nb_actions, batch_replay_size=batch_size, lr=0.5)
 
     episodes = 10000
     success_map = torch.zeros((grid_size, grid_size))
