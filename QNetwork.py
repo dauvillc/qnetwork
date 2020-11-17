@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as func
+import matplotlib.pyplot as plt
 from experience_memory import ExperienceMemory
 
 
@@ -42,9 +43,13 @@ class QNetwork:
         self.epsilon = epsilon_prob
         self.discount = discount
 
+        # Training memory
+        self.loss_mem = []
+
         # Update tools
-        self.optimizer = optim.SGD(self.net.parameters(), lr)
+        self.optimizer = optim.RMSprop(self.net.parameters(), lr)
         self.loss = nn.MSELoss()
+        self.loss.zero_grad()
 
     def memorize(self, states: torch.tensor, actions: torch.IntTensor, next_states: torch.tensor, rewards: torch.tensor):
         """
@@ -61,6 +66,14 @@ class QNetwork:
         """
         for s, a, ns, r in zip(states, actions, next_states, rewards):
             self.mem.memorize(s, a.item(), ns, r.item())
+
+    def decide(self, states: torch.tensor):
+        """
+        Decides which action is best for a given batch of states.
+        :param states (Batch_size, state_dim) set of states.
+        :return: A (Batch_size, 1) int tensor A where A[i, 0] is the index of the decided action.
+        """
+        return torch.argmax(self.forward(states), dim=1)
 
     def clear_memory(self):
         """
@@ -80,6 +93,8 @@ class QNetwork:
         y = reward + discount * max {Q[next_state, a'] for all action a'}
         Since we do not have that maximum value, we use the network's estimation.
         """
+        self.optimizer.zero_grad()
+
         output = self.forward(states)
         max_next_qval = torch.max(self.forward(next_states), dim=1)
         target = output.clone().detach()
@@ -89,7 +104,17 @@ class QNetwork:
 
         # Compute the loss
         loss = self.loss(output, target)
+        self.loss_mem.append(loss)
 
-        self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
+
+    def show_training(self):
+        """
+        Plots the training metrics.
+        """
+        fig, axes = plt.subplots()
+        axes.plot([self.batch_size * (i + 1) for i in range(len(self.loss_mem))], self.loss_mem)
+        axes.set_xlabel("Batches")
+        axes.set_ylabel("MSE Loss")
+        fig.show()
