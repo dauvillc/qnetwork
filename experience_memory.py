@@ -56,7 +56,7 @@ class ExperienceMemory:
         self.action_mem = None
         self.nstate_mem = None
 
-    def memorize(self, state: torch.tensor,
+    def memorize_single(self, state: torch.tensor,
                  action: int,
                  next_state: torch.tensor,
                  reward: torch.float32):
@@ -71,22 +71,22 @@ class ExperienceMemory:
         # as containing only the values from the first experience.
         if self.need_init:
             self.state_mem = state.view(1, -1)
-            self.action_mem = torch.tensor([action], dtype=torch.int32)
+            self.action_mem = torch.tensor([action], dtype=torch.int64)
             self.nstate_mem = next_state.view(1, -1)
             self.reward_mem = torch.tensor([reward])
             self.need_init = False
         else:
             self.state_mem = mem_tensor_append(self.state_mem, state)
             self.action_mem = torch.cat((self.action_mem,
-                                         torch.tensor([action])))
+                                         torch.tensor([action], dtype=torch.int64)))
             self.nstate_mem = mem_tensor_append(self.nstate_mem, next_state)
             self.reward_mem = torch.cat((self.reward_mem,
                                          torch.tensor([reward])))
 
-    def memorize_exploration(self, states: torch.tensor,
+    def memorize(self, states: torch.tensor,
                              actions: torch.IntTensor,
                              next_states: torch.tensor,
-                             final_reward: torch.float32):
+                             rewards: torch.tensor):
         """
         Memorizes a whole exploration process with a final single reward.
         Should be used for processes for which the reward isn't specifically known for
@@ -97,25 +97,25 @@ class ExperienceMemory:
                        (number_of_states)
         :param next_states: For each state-action (s, a) encountered, state s' returned by the
                            environment. Same shape as :param state:.
-        :param final_reward: Final score of the exploration.
+        :param final_reward: (number_of_states, )-sized 1D tensor containing the rewards for
+                             the episode.
         """
-        if len(states.size()) + len(actions.size()) + len(next_states.size()) != 6:
-            print("Error: states, actions and next_states should each be 2 dimensional.")
+        if len(states.size()) + len(actions.size()) + len(next_states.size()) != 5:
+            raise ValueError("Wrong dimensions")
             return None
 
         if self.need_init:
             self.state_mem = states
-            self.action_mem = actions
+            self.action_mem = actions.type(torch.int64)
             self.nstate_mem = next_states
-            self.reward_mem = torch.tensor([[final_reward]])
+            self.reward_mem = rewards
             self.need_init = False
         else:
             self.state_mem = torch.cat((self.state_mem, states), dim=0)
-            self.action_mem = torch.cat((self.action_mem, actions))
+            self.action_mem = torch.cat((self.action_mem, actions.type(torch.int64)))
             self.nstate_mem = torch.cat((self.nstate_mem, next_states), dim=0)
             nb_states_added = states.size()[0]
-            self.reward_mem = torch.cat((self.reward_mem,
-                                         torch.full(nb_states_added, final_reward)))
+            self.reward_mem = torch.cat((self.reward_mem, rewards))
 
     def set_last_rewards(self, nb_rewards: int, value: torch.float32):
         """
