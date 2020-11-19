@@ -37,11 +37,8 @@ def get_rewards(states: torch.tensor, actions: torch.tensor):
         nstate = next_state(states[i], actions[i])
         new_dist = distance_square([1, 1], nstate)
         dist = distance_square([1, 1], states[i])
-        if new_dist < dist:
-            rewards[i] = 0.1
-        else:
-            rewards[i] = -0.1
-    return rewards
+        rewards[i] = dist - new_dist
+    return rewards / np.sqrt(2)
 
 
 def distance_square(case1, case2) -> float:
@@ -68,7 +65,7 @@ def next_state(state: torch.tensor, action: int):
     :param action: index of the action decided by the agent
     :return: The next state as a 1D torch tensor
     """
-    step = 0.03
+    step = 0.005
     nstate = torch.tensor((state[0], state[1]))
     if action == 0:
         nstate[1] -= step
@@ -86,7 +83,7 @@ def main():
     state_dim = 2
 
     # There a 5 possible actions: North, west, south, east, stay
-    nb_actions = 4
+    nb_actions = 5
 
     # Number of episodes
     nb_episodes = 5000
@@ -127,7 +124,8 @@ def main():
         if ep % 500 == 0:
             agent.clear_memory()
 
-        print("Episodes completed: ", ep + 1, " / ", nb_episodes, end="\r")
+        print("Episodes completed: ", ep + 1, " / ", nb_episodes, "(",
+              (ep + 1) * 100 / nb_episodes, "%)", end="\r")
         # print("Final position: ", states[-1], " | Initial: ", states[0])
 
     agent.plot_trajectory(torch.rand((10, 2)), next_state)
