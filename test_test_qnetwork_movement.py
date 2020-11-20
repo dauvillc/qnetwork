@@ -31,3 +31,4 @@ net = Net(state_dim, nb_actions)
 agent = QNetwork(net, state_dim, movements, lr=0.1)
 
 test(agent, 100, 2)
+agent.train_on_memory(32, 5)

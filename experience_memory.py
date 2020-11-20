@@ -162,6 +162,13 @@ class ExperienceMemory:
                 self.nstate_mem[indxs],
                 self.reward_mem[indxs])
 
+    def all(self):
+        """
+        Returns the whole replay memory
+        :return: Four batches (states, actions, next_states, rewards).
+        """
+        return self.state_mem, self.action_mem, self.nstate_mem, self.reward_mem
+
     def clear(self):
         """
         Clears the memory.

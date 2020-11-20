@@ -5,6 +5,7 @@ position, starting at a random initial position
 
 
 from QNetwork import QNetwork
+from progress_bar import printProgressBar
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -109,13 +110,7 @@ def test(agent: QNetwork, movements=100, nb_episodes=1000, step=0.01, show_plots
         # Train after the episode
         agent.update()
 
-        # Clear the memory every 500 episodes
-        if ep % 500 == 0:
-            agent.clear_memory()
-
-        print(" " * 120, end="\r")
-        print("Episodes completed: ", ep + 1, " / ", nb_episodes, "(",
-              (ep + 1) * 40 / nb_episodes, "%)" + " " * 60, end="\r")
+        printProgressBar(ep + 1, nb_episodes, "Episodes completed: ", length=90)
         # print("Final position: ", states[-1], " | Initial: ", states[0])
 
     if show_plots:

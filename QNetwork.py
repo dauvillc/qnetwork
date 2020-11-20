@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as func
 import matplotlib.pyplot as plt
-import torch.cuda as cuda
+from progress_bar import printProgressBar
 from experience_memory import ExperienceMemory
 
 
@@ -19,6 +19,7 @@ class QNetwork:
     A QNetwork object is not the neural network itself but rather a tool to make it work with
     Q Deep Learning.
     """
+
     def __init__(self, neural_net: nn.Module, state_dim: int,
                  batch_size: int, lr=0.01, epsilon_prob=0.05, discount=0.9,
                  device=None):
@@ -64,7 +65,8 @@ class QNetwork:
         # Update tools
         self.optimizer = optim.SGD(self.net.parameters(), lr)
 
-    def memorize(self, states: torch.tensor, actions: torch.IntTensor, next_states: torch.tensor, rewards: torch.tensor):
+    def memorize(self, states: torch.tensor, actions: torch.IntTensor, next_states: torch.tensor,
+                 rewards: torch.tensor):
         """
         Memorizes a sequence of experiences which can be trained on later.
         An experience is a (s, a, ns, r) tuple where:
@@ -123,7 +125,7 @@ class QNetwork:
 
         dice = torch.rand(states.size()[0], device=self.device)
         output = self.forward(states)
-        random_actions = torch.randint(0, output.size()[1], (states.size()[0], ), device=self.device)
+        random_actions = torch.randint(0, output.size()[1], (states.size()[0],), device=self.device)
         actions = torch.argmax(output, dim=1).type(torch.int64)
         return actions * (dice >= self.epsilon) + random_actions * (dice < self.epsilon)
 
@@ -133,12 +135,14 @@ class QNetwork:
         """
         self.mem.clear()
 
-    def update(self):
+    def train_on_batch(self, states, actions, next_states, rewards):
         """
-        Updates the QNetwork's parameters using its experience memory.
+        Trains the network on a batch of experiences
+        :param states: (batch_size, state_dim) tensor indicating states
+        :param actions: (batch_size, 1) int tensor indicating actions taken
+        :param next_states: (batch_size, state_dim) tensor indicating next states
+        :param rewards: (batch_size, 1) float tensor indicating
         """
-        # Get a random batch from the experience memory
-        states, actions, next_states, rewards = self.mem.random_batch(self.batch_size)
 
         """
         The Target value to compute the loss is taken as
@@ -146,7 +150,7 @@ class QNetwork:
         Since we do not have that maximum value, we use the network's estimation.
         """
 
-        output = self.forward(states).gather(1, actions.view(states.size()[0], 1)).view((-1, ))
+        output = self.forward(states).gather(1, actions.view(states.size()[0], 1)).view((-1,))
         max_next_qval = self.forward(next_states).max(1)[0]
 
         # Modify the target so that Y[k, a] = r  + gamma * max_net_val and Y[k, a'] is unchanged for a' != a
@@ -160,6 +164,44 @@ class QNetwork:
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
+
+    def update(self):
+        """
+        Updates the QNetwork's parameters using its experience memory.
+        """
+        # Get a random batch from the experience memory
+        states, actions, next_states, rewards = self.mem.random_batch(self.batch_size)
+        self.train_on_batch(states, actions, next_states, rewards)
+
+    def train_on_memory(self, batch_size, epochs):
+        """
+        Trains the agent on experiences from its experience replay memory.
+        :param batch_size: Batch size for training
+        :param epochs: Number of times the mem should be fully browsed
+        """
+        print("Training on ", epochs, " epochs from the replay memory..")
+
+        # Get all data from the replay memory
+        states, actions, next_states, rewards = self.mem.all()
+
+        # Split them into batches
+        states_batches = torch.split(states, batch_size)
+        actions_batches = torch.split(actions, batch_size)
+        next_states_batches = torch.split(next_states, batch_size)
+        rewards_batches = torch.split(rewards, batch_size)
+
+        # Number of batches
+        nb_batches = len(states_batches)
+
+        # Train
+        for ep in range(epochs):
+            batches_completed = 0
+            for states, actions, next_states, rewards \
+                    in zip(states_batches, actions_batches, next_states_batches, rewards_batches):
+                self.train_on_batch(states, actions, next_states, rewards)
+                batches_completed += 1
+                printProgressBar(batches_completed, nb_batches,
+                                 "Epoch " + str(ep + 1) + "/" + str(epochs), length=90)
 
     def show_training(self):
         """
@@ -203,3 +245,10 @@ class QNetwork:
                 plt.plot(states[:, 0], states[:, 1])
                 plt.plot([initial_state[0]], [initial_state[1]], "go")
                 plt.plot([states[-1, 0]], [states[-1, 1]], "ro")
+
+    def set_learning_rate(self, new_lr: float):
+        """
+        Sets a value for the network's learning rate.
+        :param new_lr: New value for the learning rate
+        """
+        self.optimizer.lr = new_lr
