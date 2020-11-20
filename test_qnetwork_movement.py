@@ -113,8 +113,9 @@ def test(agent: QNetwork, movements=100, nb_episodes=1000, step=0.01, show_plots
         if ep % 500 == 0:
             agent.clear_memory()
 
+        print(" " * 120, end="\r")
         print("Episodes completed: ", ep + 1, " / ", nb_episodes, "(",
-              (ep + 1) * 100 / nb_episodes, "%)", end="\r")
+              (ep + 1) * 40 / nb_episodes, "%)" + " " * 60, end="\r")
         # print("Final position: ", states[-1], " | Initial: ", states[0])
 
     if show_plots:
