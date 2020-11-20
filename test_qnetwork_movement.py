@@ -1,53 +1,35 @@
 """
-The objective here is to teach the agent to reach a certain position on a grid.
+Implements a simple test for the QNetwork class where the agent learns to reach a central
+position, starting at a random initial position
 """
 
 
 from QNetwork import QNetwork
 import torch
-import torch.nn as nn
-import torch.nn.functional as func
-import matplotlib.pyplot as plt
 import numpy as np
+import matplotlib.pyplot as plt
 
 
-class Net1(nn.Module):
-    """
-    Net used for the agent.
-    """
-    def __init__(self, state_dim, action_dim):
-        super(Net1, self).__init__()
-        self.fc1 = nn.Linear(state_dim, 32)
-        self.fc2 = nn.Linear(32, 64)
-        self.fc3 = nn.Linear(64, action_dim)
-
-    def forward(self, batch):
-        batch = func.relu(self.fc1(batch))
-        batch = func.relu(self.fc2(batch))
-        batch = self.fc3(batch)
-        return batch
-
-
-def get_rewards(states: torch.tensor, actions: torch.tensor):
+def get_rewards(states: torch.tensor, actions: torch.tensor, step: float, device=None):
     """
     Reward function for specific (state, action) couples
     """
-    rewards = torch.empty(actions.size())
+    if device is None:
+        device = torch.device("cpu")
+    obj = torch.ones((states.size()[0], 2)) / 2
+    nstates = torch.zeros(states.size(), device=device)
     for i in range(states.size()[0]):
-        nstate = next_state(states[i], actions[i])
-        new_dist = distance_square([1, 1], nstate)
-        dist = distance_square([1, 1], states[i])
-        rewards[i] = dist - new_dist
+        nstates[i] = next_state(states[i], actions[i], step, device)
+    rewards = distance_square(states, obj) - distance_square(nstates, obj)
     return rewards / np.sqrt(2)
 
 
-def distance_square(case1, case2) -> float:
+def distance_square(cases1, cases2) -> float:
     """
-    :param case1: A 2 items iterable corresponding to a position
-    :param case2: Another position
-    :return: The square of euclidian distance between the two positions
+    :return: The square of euclidian distance between the two positions,
+             line per line.
     """
-    return (case1[0] - case2[0]) ** 2 + (case1[1] - case2[1]) ** 2
+    return (cases1[:, 0] - cases2[:, 0]) ** 2 + (cases1[:, 1] - cases2[:, 1]) ** 2
 
 
 def final_reward(final_state: torch.tensor) -> float:
@@ -59,14 +41,17 @@ def final_reward(final_state: torch.tensor) -> float:
     return - distance_square(final_state, [1, 1]) / 2
 
 
-def next_state(state: torch.tensor, action: int):
+def next_state(state: torch.tensor, action: int, step: float, device=None):
     """
     :param state: 1D torch tensor corresponding to a game state
     :param action: index of the action decided by the agent
+    :param step: Distance travelled at each move
+    :param device: Device to use for computations, defaults to the CPU
     :return: The next state as a 1D torch tensor
     """
-    step = 0.005
-    nstate = torch.tensor((state[0], state[1]))
+    if device is None:
+        device = torch.device("cpu")
+    nstate = torch.tensor((state[0], state[1]), device=device)
     if action == 0:
         nstate[1] -= step
     elif action == 1:
@@ -78,41 +63,45 @@ def next_state(state: torch.tensor, action: int):
     return nstate
 
 
-def main():
+def test(agent: QNetwork, movements=100, nb_episodes=1000, step=0.01, show_plots=True):
+    """
+    Tests the ability of the QNetwork to learn to reach the position (0.5, 0.5)
+    while spawning at random coordinates in [0, 1]^2.
+    :param agent: QNetwork to be tested. Needs to have state_dim == 2 and 5 possible actions.
+    :param movements: Number of moves the agent is allowed to have
+    :param step: Distance travelled at each move
+    :param nb_episodes: Number of episodes on which the agent trains
+    :param show_plots: if True, the agent will plot the results of the training
+    :return: The agent's loss memory
+    """
     # A state is defined as its x and y coordinates
     state_dim = 2
 
-    # There a 5 possible actions: North, west, south, east, stay
-    nb_actions = 5
+    # Calculation device
+    device = torch.device("cpu")
 
-    # Number of episodes
-    nb_episodes = 5000
-
-    # Number of movements allowed in a single episode
-    movements = 100
-
-    net = Net1(state_dim, nb_actions)
-    agent = QNetwork(net, state_dim, movements, lr=0.1)
+    # net = Net1(state_dim, nb_actions)
+    # QNetwork(net, state_dim, movements, lr=0.1, device=torch.device("cpu"))
 
     for ep in range(nb_episodes):
         # Play a single episode
 
         # Create arrays to store the successive states and taken actions
-        states = torch.empty((movements + 1, state_dim))  # + 1 to make space for the last state
-        actions = torch.empty(movements, dtype=torch.int32)
+        states = torch.empty((movements + 1, state_dim), device=device)  # + 1 to make space for the last state
+        actions = torch.empty(movements, dtype=torch.int32, device=device)
 
         # Start with a random position
         states[0] = torch.rand(2)
 
-        for step in range(movements):
+        for move in range(movements):
             # Take action
-            actions[step] = agent.decide(states[step].view(1, -1)).item()
+            actions[move] = agent.decide(states[move].view(1, -1)).item()
 
             # Get next state
-            states[step + 1] = next_state(states[step], actions[step])
+            states[move + 1] = next_state(states[move], actions[move], step, device)
 
         # Get rewards
-        rewards = get_rewards(states[:-1], actions)
+        rewards = get_rewards(states[:-1], actions, step, device)
 
         # Memorize the episode
         agent.memorize_exploration(states, actions, rewards)
@@ -128,11 +117,15 @@ def main():
               (ep + 1) * 100 / nb_episodes, "%)", end="\r")
         # print("Final position: ", states[-1], " | Initial: ", states[0])
 
-    agent.plot_trajectory(torch.rand((10, 2)), next_state)
-    agent.show_training()
+    if show_plots:
+        plt.figure("Training summary")
+        plt.subplot(211)
+        plt.title("Agent Trajectories")
+        agent.plot_trajectory(torch.rand((50, 2)), lambda s, a: next_state(s, a, step, device))
+        plt.subplot(212)
+        plt.title("MSE Loss")
+        agent.show_training()
+        plt.show()
+    return agent.loss_mem
 
     return 0
-
-
-if __name__ == "__main__":
-    main()

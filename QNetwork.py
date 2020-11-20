@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as func
 import matplotlib.pyplot as plt
+import torch.cuda as cuda
 from experience_memory import ExperienceMemory
 
 
@@ -19,7 +20,8 @@ class QNetwork:
     Q Deep Learning.
     """
     def __init__(self, neural_net: nn.Module, state_dim: int,
-                 batch_size: int, lr=0.01, epsilon_prob=0.05, discount=0.9):
+                 batch_size: int, lr=0.01, epsilon_prob=0.05, discount=0.9,
+                 device=None):
         """
         :param neural_net: A Neural Network created with PyTorch. Needs to be a subclass of
                            torch.nn.Module and implement methodes __init__ and forward(self, batch).
@@ -33,15 +35,28 @@ class QNetwork:
                              best one according to the QValues. Only relevant if decide() is used.
         :param discount: Discount factor (usually called gamma), representing the importance of early
                          decisions comparatively to later ones.
+        :param device:   Device that will be used to compute the calculations. Defaults to the the
+                         first gpu if possible, or the CPU otherwise.
         """
         self.net = neural_net
         self.net.zero_grad()
         self.state_dim = state_dim
-        self.mem = ExperienceMemory()
         self.forward = self.net.forward
         self.batch_size = batch_size
         self.epsilon = epsilon_prob
         self.discount = discount
+
+        # If the user did not specify a computation device, the cpu is used by default
+        # This is because GPU isn't necessarily faster for explorations
+        if device is None:
+            dev_name = "cpu"
+            device = torch.device(dev_name)
+
+        # Set the neural network and memory to the device
+        self.net.to(device)
+        self.mem = ExperienceMemory(device)
+
+        self.device = device
 
         # Training memory
         self.loss_mem = []
@@ -80,6 +95,9 @@ class QNetwork:
                            environment. Same shape as :param state:.
         :param rewards (number_of_states - 1, )-sized 1D Tensor indicating the rewards for the episode
         """
+        states = states.to(self.device)
+        actions = actions.to(self.device)
+        rewards = rewards.to(self.device)
         next_states = states[1:].clone().detach()
         self.mem.memorize(states[:-1], actions, next_states, rewards)
 
@@ -100,9 +118,12 @@ class QNetwork:
         :param states (Batch_size, state_dim) set of states.
         :return: A (Batch_size, 1) int tensor A where A[i, 0] is the index of the decided action.
         """
-        dice = torch.rand(states.size()[0])
+        # Make sure the states tensor runs on the right device
+        states = states.to(self.device)
+
+        dice = torch.rand(states.size()[0], device=self.device)
         output = self.forward(states)
-        random_actions = torch.randint(0, output.size()[1], (states.size()[0], ))
+        random_actions = torch.randint(0, output.size()[1], (states.size()[0], ), device=self.device)
         actions = torch.argmax(output, dim=1).type(torch.int64)
         return actions * (dice >= self.epsilon) + random_actions * (dice < self.epsilon)
 
@@ -144,11 +165,9 @@ class QNetwork:
         """
         Plots the training metrics.
         """
-        fig, axes = plt.subplots()
-        axes.plot([self.batch_size * (i + 1) for i in range(len(self.loss_mem))], self.loss_mem)
-        axes.set_xlabel("Batches")
-        axes.set_ylabel("MSE Loss")
-        fig.show()
+        plt.plot([self.batch_size * (i + 1) for i in range(len(self.loss_mem))], self.loss_mem)
+        plt.xlabel("Batches")
+        plt.ylabel("MSE Loss")
 
     def plot_trajectory(self, initial_states: torch.tensor, next_state_function,
                         steps=100):
@@ -161,9 +180,11 @@ class QNetwork:
             Should have signature (state: torch.tensor, action: int)
         :param steps: Number of successive states that should be plotted.
         """
+        # Make sure the initial state runs on the right device
+        initial_states = initial_states.to(self.device)
+
         if self.state_dim != 1 and self.state_dim != 2:
             raise ValueError("State dimension too large to plot agent trajectory.\n")
-        fig, ax = plt.subplots()
         for initial_state in initial_states:
             states = torch.empty((steps, self.state_dim))
             states[0] = initial_state
@@ -175,13 +196,10 @@ class QNetwork:
 
             # Plotting
             if self.state_dim == 1:
-                ax.plot(torch.arange(0, step), states)
-                ax.plot([0], [initial_state[0]], "o")
-                ax.plot([steps - 1], [states[-1].item()], "o")
+                plt.plot(torch.arange(0, step), states)
+                plt.plot([0], [initial_state[0]], "go")
+                plt.plot([steps - 1], [states[-1].item()], "ro")
             elif self.state_dim == 2:
-                ax.plot(states[:, 0], states[:, 1])
-                ax.plot([initial_state[0]], [initial_state[1]], "o")
-                ax.plot([states[-1, 0]], [states[-1, 1]], "o")
-
-        ax.set_title("Agent trajectories")
-        fig.show()
+                plt.plot(states[:, 0], states[:, 1])
+                plt.plot([initial_state[0]], [initial_state[1]], "go")
+                plt.plot([states[-1, 0]], [states[-1, 1]], "ro")

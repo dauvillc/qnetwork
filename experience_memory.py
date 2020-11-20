@@ -48,18 +48,22 @@ class ExperienceMemory:
         a in the state s.
     """
 
-    def __init__(self):
+    def __init__(self, device):
+        """
+        :param device: Device the use for computations
+        """
         # need init is True until a first experience is added using memorize()
         self.need_init = True
         self.reward_mem = None
         self.state_mem = None
         self.action_mem = None
         self.nstate_mem = None
+        self.device = device
 
     def memorize_single(self, state: torch.tensor,
-                 action: int,
-                 next_state: torch.tensor,
-                 reward: torch.float32):
+                        action: int,
+                        next_state: torch.tensor,
+                        reward: torch.float32):
         """
         Memorizes a single experience.
         :param state:   Starting state
@@ -67,26 +71,30 @@ class ExperienceMemory:
         :param next_state    Resulting state
         :param reward   Real value, reward received from the environment
         """
+        # Make sure the tensors are on the right device
+        state.to(self.device)
+        next_state.to(self.device)
+
         # If nothing had been stored previously, the memory is initialized
         # as containing only the values from the first experience.
         if self.need_init:
             self.state_mem = state.view(1, -1)
-            self.action_mem = torch.tensor([action], dtype=torch.int64)
+            self.action_mem = torch.tensor([action], dtype=torch.int64, device=self.device)
             self.nstate_mem = next_state.view(1, -1)
             self.reward_mem = torch.tensor([reward])
             self.need_init = False
         else:
             self.state_mem = mem_tensor_append(self.state_mem, state)
             self.action_mem = torch.cat((self.action_mem,
-                                         torch.tensor([action], dtype=torch.int64)))
+                                         torch.tensor([action], dtype=torch.int64, device=self.device)))
             self.nstate_mem = mem_tensor_append(self.nstate_mem, next_state)
             self.reward_mem = torch.cat((self.reward_mem,
-                                         torch.tensor([reward])))
+                                         torch.tensor([reward], device=self.device)))
 
     def memorize(self, states: torch.tensor,
-                             actions: torch.IntTensor,
-                             next_states: torch.tensor,
-                             rewards: torch.tensor):
+                 actions: torch.IntTensor,
+                 next_states: torch.tensor,
+                 rewards: torch.tensor):
         """
         Memorizes a whole exploration process with a final single reward.
         Should be used for processes for which the reward isn't specifically known for
@@ -97,12 +105,18 @@ class ExperienceMemory:
                        (number_of_states)
         :param next_states: For each state-action (s, a) encountered, state s' returned by the
                            environment. Same shape as :param state:.
-        :param final_reward: (number_of_states, )-sized 1D tensor containing the rewards for
+        :param rewards: (number_of_states, )-sized 1D tensor containing the rewards for
                              the episode.
         """
         if len(states.size()) + len(actions.size()) + len(next_states.size()) != 5:
             raise ValueError("Wrong dimensions")
             return None
+
+        # Make sure the tensors are on the right device
+        states.to(self.device)
+        next_states.to(self.device)
+        actions.to(self.device)
+        rewards.to(self.device)
 
         if self.need_init:
             self.state_mem = states
@@ -152,7 +166,14 @@ class ExperienceMemory:
         """
         Clears the memory.
         """
-        self.__init__()
+        self.__init__(self.device)
+
+    def to(self, device: torch.device):
+        """
+        Indicates a device (GPU, CPU) to use.
+        :param device: Device to use
+        """
+        self.device = device
 
     def __str__(self):
         return "ExperienceMemory object:\n" \
