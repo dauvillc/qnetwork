@@ -61,6 +61,18 @@ def next_state(state: torch.tensor, action: int, step: float, device=None):
         nstate[1] += step
     elif action == 3:
         nstate[0] -= step
+    elif action == 4:
+        nstate[0] += step
+        nstate[1] -= step
+    elif action == 5:
+        nstate[0] += step
+        nstate[1] += step
+    elif action == 6:
+        nstate[0] -= step
+        nstate[1] += step
+    elif action == 7:
+        nstate[0] -= step
+        nstate[1] -= step
     return nstate
 
 
@@ -105,7 +117,7 @@ def test(agent: QNetwork, movements=100, nb_episodes=1000, step=0.01, show_plots
         rewards = get_rewards(states[:-1], actions, step, device)
 
         # Memorize the episode
-        agent.memorize_exploration(states, actions, rewards)
+        agent.memorize_exploration(states, actions, rewards, last_state_is_final=False)
 
         # Train after the episode
         agent.update()
@@ -115,12 +127,12 @@ def test(agent: QNetwork, movements=100, nb_episodes=1000, step=0.01, show_plots
 
     if show_plots:
         plt.figure("Training summary")
-        plt.subplot(211)
+        plt.subplot(111)
         plt.title("Agent Trajectories")
         agent.plot_trajectory(torch.rand((50, 2)), lambda s, a: next_state(s, a, step, device))
-        plt.subplot(212)
-        plt.title("MSE Loss")
-        agent.show_training()
+        # plt.subplot(212)
+        # plt.title("MSE Loss")
+        # agent.show_training()
         plt.show()
     return agent.loss_mem
 

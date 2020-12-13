@@ -47,6 +47,9 @@ class QNetwork:
         self.epsilon = epsilon_prob
         self.discount = discount
 
+        # Random decision mode: If True, the agent will decide of actions randomly
+        self.random_mode = False
+
         # If the user did not specify a computation device, the cpu is used by default
         # This is because GPU isn't necessarily faster for explorations
         if device is None:
@@ -74,7 +77,8 @@ class QNetwork:
         -a is the decided action;
         -ns is the state resulting from taking action a in state s;
         -r is the reward received from the environment.
-        :param states: A 2D (batch_size, state_dim) shaped tensor containing the experiences' states.
+        :param states: A 2D (batch_size, state_dim + 1) shaped tensor containing the experiences' states.
+                        The last value of the second dimension must be 1 if the state is final or 0 otherwise.
         :param actions: A 2D (batch_size, 1) integer tensor containing the experiences' decided actions.
         :param next_states: A 2D (batch_size, state_dim) tensor containing the experiences' next_states.
         :param rewards: A 2D (batch_size, 1) tensor containing the experiences' rewards.
@@ -84,24 +88,33 @@ class QNetwork:
 
     def memorize_exploration(self, states: torch.tensor,
                              actions: torch.IntTensor,
-                             rewards: torch.tensor):
+                             rewards: torch.tensor,
+                             last_state_is_final=True):
         """
         Memorizes a whole exploration process with a final single reward.
         Should be used for processes for which the reward isn't specifically known for
         every state-action couple, but rather according to a final score.
         :param states: Successive states encountered. Should be a tensor of shape
-                      (number_of_states, state_dim). This should include
+                      (number_of_states, state_dim)
         :param actions: Successive actions decided by the agent. Should be a tensor of shape
                        (number_of_states - 1, )
         :param next_states: For each state-action (s, a) encountered, state s' returned by the
                            environment. Same shape as :param state:.
         :param rewards (number_of_states - 1, )-sized 1D Tensor indicating the rewards for the episode
+        :param last_state_is_final: Indicates whether the last state in the exploration was final.
         """
         states = states.to(self.device)
+
+        # Creates a tensor containing [0, 0, ..., 0, 1] to indicate that only the last state was final
+        final_indicator = torch.zeros(states.size()[0] - 1, device=self.device)
+        final_indicator[-1] = last_state_is_final
+        # States at the beginning of each step, including the final indicator
+        starting_states = torch.cat((states[:-1], final_indicator.view(-1, 1)), dim=1)
+
         actions = actions.to(self.device)
         rewards = rewards.to(self.device)
         next_states = states[1:].clone().detach()
-        self.mem.memorize(states[:-1], actions, next_states, rewards)
+        self.mem.memorize(starting_states, actions, next_states, rewards)
 
     def set_last_rewards(self, nb_experiences: int, reward: torch.double):
         """
@@ -123,11 +136,16 @@ class QNetwork:
         # Make sure the states tensor runs on the right device
         states = states.to(self.device)
 
-        dice = torch.rand(states.size()[0], device=self.device)
         output = self.forward(states)
         random_actions = torch.randint(0, output.size()[1], (states.size()[0],), device=self.device)
-        actions = torch.argmax(output, dim=1).type(torch.int64)
-        return actions * (dice >= self.epsilon) + random_actions * (dice < self.epsilon)
+
+        # If the network is on random mode, return random actions
+        if self.random_mode:
+            return random_actions
+        else:
+            dice = torch.rand(states.size()[0], device=self.device)
+            actions = torch.argmax(output, dim=1).type(torch.int64)
+            return actions * (dice >= self.epsilon) + random_actions * (dice < self.epsilon)
 
     def clear_memory(self):
         """
@@ -135,10 +153,18 @@ class QNetwork:
         """
         self.mem.clear()
 
+    def set_random_mode(self, value: bool):
+        """
+        Sets the network to a random mode: if True, the network will decide of actions
+        randomly (As if the epsilon probability was 1).
+        """
+        self.random_mode = value
+
     def train_on_batch(self, states, actions, next_states, rewards):
         """
         Trains the network on a batch of experiences
-        :param states: (batch_size, state_dim) tensor indicating states
+        :param states: (batch_size, state_dim + 1) tensor indicating the states. The last value of the second
+                dimension should be either 1 if the state is a final state or 0 otherwise.
         :param actions: (batch_size, 1) int tensor indicating actions taken
         :param next_states: (batch_size, state_dim) tensor indicating next states
         :param rewards: (batch_size, 1) float tensor indicating
@@ -150,11 +176,17 @@ class QNetwork:
         Since we do not have that maximum value, we use the network's estimation.
         """
 
+        # Tensor containing information about whether the states are final
+        final_indicator = states[:, -1]
+
+        # Now remove that information from the states tensor
+        states = states[:, :-1]
+
         output = self.forward(states).gather(1, actions.view(states.size()[0], 1)).view((-1,))
         max_next_qval = self.forward(next_states).max(1)[0]
 
         # Modify the target so that Y[k, a] = r  + gamma * max_net_val and Y[k, a'] is unchanged for a' != a
-        target = rewards + self.discount * max_next_qval
+        target = rewards + self.discount * max_next_qval * final_indicator
         target = target.detach()
 
         # Compute the loss

@@ -22,7 +22,7 @@ class Net(nn.Module):
         return batch
 
 
-state_dim, nb_actions = 2, 5
+state_dim, nb_actions = 2, 9
 movements = 10
 step = 0.01
 
@@ -30,5 +30,5 @@ net = Net(state_dim, nb_actions)
 
 agent = QNetwork(net, state_dim, movements, lr=0.1)
 
-test(agent, 100, 2)
+test(agent)
 agent.train_on_memory(32, 5)
