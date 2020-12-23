@@ -96,15 +96,12 @@ class ExperienceMemory:
                  next_states: torch.tensor,
                  rewards: torch.tensor):
         """
-        Memorizes a whole exploration process with a final single reward.
-        Should be used for processes for which the reward isn't specifically known for
-        every state-action couple, but rather according to a final score.
-        :param states: Successive states encountered. Should be a tensor of shape
-                      (number_of_states, state_dim).
+        Memorizes a batch of exploration transitions (quadruples s, a, ns, r).
+        :param states: Successive states encountered. Should have shape (number_of_states, state_dim + 1) where
+                           the last column values are either 1 if the correspond state is final or 0 otherwise.
         :param actions: Successive actions decided by the agent. Should be a tensor of shape
                        (number_of_states)
-        :param next_states: For each state-action (s, a) encountered, state s' returned by the
-                           environment. Same shape as :param state:.
+        :param next_states: (number_of_states, state_dim) shaped tensor indicating the next states.
         :param rewards: (number_of_states, )-sized 1D tensor containing the rewards for
                              the episode.
         """

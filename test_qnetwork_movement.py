@@ -52,7 +52,7 @@ def next_state(state: torch.tensor, action: int, step: float, device=None):
     """
     if device is None:
         device = torch.device("cpu")
-    nstate = torch.tensor((state[0], state[1]), device=device)
+    nstate = torch.tensor((state[0], state[1], 0), device=device)
     if action == 0:
         nstate[1] -= step
     elif action == 1:

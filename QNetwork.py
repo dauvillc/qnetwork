@@ -12,6 +12,14 @@ from progress_bar import printProgressBar
 from experience_memory import ExperienceMemory
 
 
+def shuffle_batch(batch: torch.tensor):
+    """
+    Shuffles all rows of a 2D tensor.
+    """
+    random_lines = torch.randperm(batch.size()[0])
+    return batch[random_lines]
+
+
 class QNetwork:
     """
     A QNetwork is a neural network which uses a Q-Learning approach associated with
@@ -77,14 +85,13 @@ class QNetwork:
         -a is the decided action;
         -ns is the state resulting from taking action a in state s;
         -r is the reward received from the environment.
-        :param states: A 2D (batch_size, state_dim + 1) shaped tensor containing the experiences' states.
-                        The last value of the second dimension must be 1 if the state is final or 0 otherwise.
+        :param states: A 2D (batch_size, state_dim) shaped tensor containing the experiences' states.
         :param actions: A 2D (batch_size, 1) integer tensor containing the experiences' decided actions.
-        :param next_states: A 2D (batch_size, state_dim) tensor containing the experiences' next_states.
+        :param next_states: A 2D (batch_size, state_dim + 1) tensor containing the experiences' next_states.
+                        The last value of the second dimension must be 1 if the state is final or 0 otherwise.
         :param rewards: A 2D (batch_size, 1) tensor containing the experiences' rewards.
         """
-        for s, a, ns, r in zip(states, actions, next_states, rewards):
-            self.mem.memorize(s, a.item(), ns, r.item())
+        self.mem.memorize(states, actions, next_states, rewards)
 
     def memorize_exploration(self, states: torch.tensor,
                              actions: torch.IntTensor,
@@ -109,12 +116,11 @@ class QNetwork:
         final_indicator = torch.zeros(states.size()[0] - 1, device=self.device)
         final_indicator[-1] = last_state_is_final
         # States at the beginning of each step, including the final indicator
-        starting_states = torch.cat((states[:-1], final_indicator.view(-1, 1)), dim=1)
+        next_states = torch.cat((states[1:], final_indicator.view(-1, 1)), dim=1)
 
         actions = actions.to(self.device)
         rewards = rewards.to(self.device)
-        next_states = states[1:].clone().detach()
-        self.mem.memorize(starting_states, actions, next_states, rewards)
+        self.mem.memorize(states[:-1], actions, next_states, rewards)
 
     def set_last_rewards(self, nb_experiences: int, reward: torch.double):
         """
@@ -147,6 +153,19 @@ class QNetwork:
             actions = torch.argmax(output, dim=1).type(torch.int64)
             return actions * (dice >= self.epsilon) + random_actions * (dice < self.epsilon)
 
+    def decide_best(self, states: torch.tensor):
+        """
+        Decides which action is best for a given batch of states, without taking the epsilon strategy into account.
+        :param states: (Batch_size, state_dim) set of states.
+        :return: A (Batch_size, 1) int tensor A where A[i, 0] is the index of the preferred action according to the
+            network.
+        """
+        # Make sure the states tensor runs on the right device
+        states = states.to(self.device)
+
+        output = self.forward(states)
+        return torch.argmax(output, dim=1).type(torch.int64);
+
     def clear_memory(self):
         """
         Clears the agent's Experience Memory.
@@ -163,10 +182,11 @@ class QNetwork:
     def train_on_batch(self, states, actions, next_states, rewards):
         """
         Trains the network on a batch of experiences
-        :param states: (batch_size, state_dim + 1) tensor indicating the states. The last value of the second
-                dimension should be either 1 if the state is a final state or 0 otherwise.
+        :param states: (batch_size, state_dim) tensor indicating the states.
         :param actions: (batch_size, 1) int tensor indicating actions taken
-        :param next_states: (batch_size, state_dim) tensor indicating next states
+        :param next_states: (batch_size, state_dim + 1) tensor indicating next states.
+                The last value of the second dimension should be either 1 if the state
+                is a final state or 0 otherwise.
         :param rewards: (batch_size, 1) float tensor indicating
         """
 
@@ -177,16 +197,27 @@ class QNetwork:
         """
 
         # Tensor containing information about whether the states are final
-        final_indicator = states[:, -1]
+        final_indicator = next_states[:, -1]
 
-        # Now remove that information from the states tensor
-        states = states[:, :-1]
+        # Now remove that information from the next states tensor
+        next_states = next_states[:, :-1]
+
+        # Divide final and non final states
+        non_final_states = next_states[final_indicator == 0, :]
 
         output = self.forward(states).gather(1, actions.view(states.size()[0], 1)).view((-1,))
-        max_next_qval = self.forward(next_states).max(1)[0]
 
-        # Modify the target so that Y[k, a] = r  + gamma * max_net_val and Y[k, a'] is unchanged for a' != a
-        target = rewards + self.discount * max_next_qval * final_indicator
+        # Modify the target so that Y[k, a] = r  + gamma * max_net_val
+        # and Y[k, a'] is unchanged for a' != a
+        # If the next state is final, don't take into account the reward obtainable from it
+        target = torch.zeros(rewards.size(), device=self.device)
+        target[final_indicator == 1] = rewards[final_indicator == 1]
+
+        # If the next state isn't final, estimate the max reward obtainable from it
+        # using the network itself.
+        if non_final_states.size()[0] > 0:
+            max_next_qval = self.forward(non_final_states).max(1)[0]
+            target[final_indicator == 0] = rewards[final_indicator == 0] + self.discount * max_next_qval
         target = target.detach()
 
         # Compute the loss
@@ -215,6 +246,13 @@ class QNetwork:
 
         # Get all data from the replay memory
         states, actions, next_states, rewards = self.mem.all()
+
+        # Shuffling the batches
+        lines_shuffle = torch.randperm(states.size()[0])
+        states = states[lines_shuffle]
+        actions = actions[lines_shuffle]
+        rewards = rewards[lines_shuffle]
+        next_states = next_states[lines_shuffle]
 
         # Split them into batches
         states_batches = torch.split(states, batch_size)
@@ -265,7 +303,7 @@ class QNetwork:
 
             # Exploration
             for step in range(steps - 1):
-                action = self.decide(states[step].view(1, -1)).item()
+                action = self.decide_best(states[step].view(1, -1)).item()
                 states[step + 1] = next_state_function(states[step], action)
 
             # Plotting
@@ -284,3 +322,12 @@ class QNetwork:
         :param new_lr: New value for the learning rate
         """
         self.optimizer.lr = new_lr
+
+    def set_device(self, device: torch.device):
+        """
+        Sets a new device for training computations.
+        :param device:  Torch device object.
+        """
+        self.device = device
+        self.mem.to(device)
+        self.net.to(device)
